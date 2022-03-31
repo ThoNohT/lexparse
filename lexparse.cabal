@@ -27,6 +27,7 @@ executable lexparse
   main-is: Main.hs
   other-modules:
       Tokenizer
+      Tokenizers
       Paths_lexparse
   hs-source-dirs:
       src

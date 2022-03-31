@@ -1,41 +1,37 @@
 module Main where
 
-import Data.Text (Text)
-import qualified Data.Text as T
+import Data.List (singleton)
+import Data.Text (Text, pack, snoc, unpack)
 import Tokenizer
-
-charTokenizer :: Char -> (Char -> Tokenizer tkn) -> Tokenizer tkn
-charTokenizer char cont =
-  Tokenizer $ \case
-    Just ch | ch == char -> Collecting $ cont ch
-    _ -> Failed
-
-doneTokenizer :: tkn -> Tokenizer tkn
-doneTokenizer res = Tokenizer $ \_ -> Done res
-
-failedTokenizer :: Tokenizer tkn
-failedTokenizer = Tokenizer $ const Failed
+import Tokenizers as T
 
 stringLiteralTokenizer :: Tokenizer Text
 stringLiteralTokenizer =
-  charTokenizer '"' (\_ -> insideTokenizer "")
+  T.char '"' |/=> insideTokenizer ""
  where
   insideTokenizer :: Text -> Tokenizer Text
   insideTokenizer soFar = Tokenizer $ \case
-    Just '"' -> Collecting $ doneTokenizer soFar
-    Just ch -> Collecting $ insideTokenizer (T.snoc soFar ch)
+    Just '"' -> Collecting $ T.done soFar
+    Just ch -> Collecting $ insideTokenizer (snoc soFar ch)
     Nothing -> Failed
+
+slt2 :: Tokenizer Text
+slt2 = pack <$> T.char '\'' |/=> T.preds ('\'' /=) T.done (const Failed)
 
 testTokenizers :: [Tokenizer String]
 testTokenizers =
-  [ charTokenizer 'a' (\c1 -> charTokenizer 'a' (\c2 -> doneTokenizer [c1, c2]))
-  , charTokenizer 'b' (\c1 -> charTokenizer 'b' (\c2 -> doneTokenizer [c1, c2]))
-  , charTokenizer 'b' (\c1 -> charTokenizer 'a' (\c2 -> doneTokenizer [c1, c2]))
-  , charTokenizer 'a' (\c1 -> doneTokenizer [c1])
-  , T.unpack <$> stringLiteralTokenizer
+  [ T.char 'a' |=> \c1 -> T.char 'a' |=> \c2 -> T.done [c1, c2]
+  , T.char 'b' |=> \c1 -> T.char 'b' |=> \c2 -> T.done [c1, c2]
+  , T.char 'b' |=> \c1 -> T.char 'a' |=> \c2 -> T.done [c1, c2]
+  , T.char 'a' |=> (T.done . singleton)
+  , unpack <$> stringLiteralTokenizer
+  , unpack <$> slt2
+  , T.preds (const True) T.done Done
   ]
 
 main :: IO ()
 main = do
   print $ tokenize testTokenizers "aabbba"
   print $ tokenize testTokenizers "abb\"Hello, World!\"baa"
+  print $ tokenize testTokenizers "abb'Hello, World!'baa"
+  print $ tokenize testTokenizers "abb'Hello, World!'baa\""
