@@ -1,4 +1,4 @@
-module Tokenizer (TokenizerResult (..), Tokenizer (..), tokenize, (|=>), (|/=>)) where
+module Tokenizer (TokenizerResult (..), Tokenizer (..), tokenize) where
 
 import Control.Applicative (Alternative ((<|>)))
 import Data.Function ((&))
@@ -37,6 +37,54 @@ newtype Tokenizer tkn = Tokenizer {munch :: Maybe Char -> TokenizerResult tkn}
 
 instance Functor Tokenizer where fmap f (Tokenizer munch) = Tokenizer (fmap f . munch)
 
+instance Applicative Tokenizer where
+  pure x = Tokenizer $ \_ -> Done x
+  tf <*> tv = applyF tf tv
+   where
+    applyF :: Tokenizer (a -> b) -> Tokenizer a -> Tokenizer b
+    applyF (Tokenizer f) tv@(Tokenizer v) = Tokenizer $ \c ->
+      case f c of
+        Failed -> Failed
+        Collecting tn -> Collecting $ applyF tn tv
+        Done f' ->
+          Collecting $
+            Tokenizer $ \c' ->
+              case v c' of
+                Failed -> Failed
+                Collecting tn -> Collecting $ applyV f' tn
+                Done v' -> Done $ f' v'
+
+    applyV :: (a -> b) -> Tokenizer a -> Tokenizer b
+    applyV f tv@(Tokenizer v) = Tokenizer $ \c ->
+      case v c of
+        Failed -> Failed
+        Collecting tn -> Collecting $ applyV f tn
+        Done v' -> Done $ f v'
+
+instance Monad Tokenizer where
+  tv >>= ft = bindV tv ft
+   where
+    bindV :: Tokenizer a -> (a -> Tokenizer b) -> Tokenizer b
+    bindV (Tokenizer v) ft = Tokenizer $ \c ->
+      case v c of
+        Failed -> Failed
+        Collecting tn -> Collecting $ bindV tn ft
+        Done v' -> Collecting $
+          Tokenizer $ \c' ->
+            case ft v' `munch` c' of
+              Failed -> Failed
+              Collecting tn -> Collecting $ bindF tn
+              Done v' -> Done v'
+
+    bindF :: Tokenizer b -> Tokenizer b
+    bindF (Tokenizer f) = Tokenizer $ \c ->
+      case f c of
+        Failed -> Failed
+        Collecting tn -> Collecting $ bindF tn
+        Done v' -> Done v'
+
+-- instance Monad Tokenizer where
+
 {- | Running tokenizers: Whenever we are between tokens, all known tokenizers will be fed with the next character,
   which should lead them to determine if they can create a token from it. Every tokenizer that returns Failed will
   not be considered for the next step. Whenever the first tokenizer returns Done, this token is returned, and the
@@ -61,7 +109,7 @@ runTokenizers tokenizers input =
           collecting = mapMaybe toCollecting activeTokenizers
        in (,input) <$> done <|> runTokenizers collecting rest
 
-{- | Run the provided tokenizers on the input text, until there is no text remaining, or until all tokenizers fail. -}
+-- | Run the provided tokenizers on the input text, until there is no text remaining, or until all tokenizers fail.
 tokenize :: Show tkn => [Tokenizer tkn] -> Text -> Maybe [tkn]
 tokenize tokenizers input = reverse <$> go [] tokenizers input
  where
@@ -70,13 +118,3 @@ tokenize tokenizers input = reverse <$> go [] tokenizers input
     case runTokenizers tokenizers input of
       Nothing -> Nothing
       Just (tkn, rest) -> go (tkn : acc) tokenizers rest
-
-{-| Combine two tokenizers, where the continuation is normally passed as the last argument, it is now separated by this
- operator, which can reduce the number of parentheses needed. -}
-(|=>) :: ((a -> Tokenizer b) -> Tokenizer b) -> (a -> Tokenizer b) -> Tokenizer b
-ta |=> cont = ta cont
-
-{-| Combine two tokenizers, where the second one is the continuation from the first one, but ignores its result. -}
-(|/=>) :: ((a -> Tokenizer b) -> Tokenizer b) -> Tokenizer b -> Tokenizer b
-ta |/=> cont = ta $ const cont
-

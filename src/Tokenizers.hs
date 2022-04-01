@@ -10,38 +10,33 @@ import Tokenizer
 {- | A tokenizer that accepts a character given that it satisfies the provided predicate, and continues with the
  provided tokenizer.
 -}
-pred :: (Char -> Bool) -> (Char -> Tokenizer tkn) -> Tokenizer tkn
-pred prd cont =
+pred :: (Char -> Bool) -> Tokenizer Char
+pred prd =
   Tokenizer $ \case
-    Just ch | prd ch -> Collecting $ cont ch
+    Just ch | prd ch -> Done ch
     _ -> Failed
-
-{- | A tokenizer that accepts multiple characters as long as it satisfies the predicate, and continues with the
-  provided tokenizer once it no longer does. When the end is reached, a contiuation is no longer possible, so
-  a function mapping the collected characters to a result is invoked instead.
--}
-preds :: (Char -> Bool) -> ([Char] -> Tokenizer tkn) -> ([Char] -> TokenizerResult tkn) -> Tokenizer tkn
-preds prd cont atEnd = go []
- where
-  go acc = Tokenizer $ \case
-    Just ch | prd ch -> Collecting $ go (ch : acc)
-    Just _ -> Collecting $ cont $ reverse acc
-    Nothing -> atEnd $ reverse acc
-
--- | Like preds, except it must match at least once.
-preds1 :: (Char -> Bool) -> ([Char] -> Tokenizer tkn) -> ([Char] -> TokenizerResult tkn) -> Tokenizer tkn
-preds1 prd cont atEnd = pred prd |=> \c -> preds prd (\cs -> cont $ c : cs) (\cs -> atEnd $ c : cs)
 
 {- | A tokenizer that accepts a single specific character, and continues with the provided tokenizer, or end result
  mapping.
 -}
-char :: Char -> (Char -> Tokenizer tkn) -> Tokenizer tkn
+char :: Char -> Tokenizer Char
 char char = pred (char ==)
 
--- | A tokenizer that ignores its input and returns Done with the provided value.
-done :: tkn -> Tokenizer tkn
-done res = Tokenizer $ \_ -> Done res
+{- | A tokenizer that accepts a tokenizer and applies it zero or more times until it fails.
+ Note that the characters causing a tokenizer to fail are also consumed.
+-}
+many :: Tokenizer tkn -> Tokenizer [tkn]
+many (Tokenizer f) = reverse <$> go []
+ where
+  go acc = Tokenizer $ \c ->
+    case f c of
+      Failed -> Done acc
+      Done r -> Collecting $ go (r : acc)
+      Collecting tn -> Collecting $ go acc
 
--- | A tokenizer that ignores its input and returns Failed.
-failed :: Tokenizer tkn
-failed = Tokenizer $ const Failed
+-- | A tokenizer that accepts a tokenizer and applies it until it fails, but fails if it does not succeed at least once.
+many1 :: Tokenizer tkn -> Tokenizer [tkn]
+many1 tk = do
+  first <- tk
+  rest <- many tk
+  pure $ first : rest
