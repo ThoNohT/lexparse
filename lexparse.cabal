@@ -26,6 +26,7 @@ source-repository head
 executable lexparse
   main-is: Main.hs
   other-modules:
+      Parser
       Tokenizer
       Tokenizers
       Paths_lexparse
